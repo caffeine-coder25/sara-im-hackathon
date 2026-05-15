@@ -405,31 +405,34 @@ def page_overview(df: pd.DataFrame):
         view = view[view["service"].isin(service_filter)]
 
     view = view.head(50)[["seller_id","seller_name","service","city","churn_score","risk_band",
-                            "replies_202605","lapse_rate","bd_days_gap","action_taken","package_value"]]
+                            "replies_202605","lapse_rate","bd_days_gap","action_taken","package_value"]].copy()
+
+    # Embed emoji into Band so color is visible without Styler (Styler breaks row-click)
+    view["risk_band"] = view["risk_band"].map(lambda b: f"{BAND_EMOJI.get(b,'')} {b}")
+    view["lapse_rate"] = (view["lapse_rate"] * 100).round(0).astype(int).astype(str) + "%"
+    view["churn_score"] = view["churn_score"].round(1)
+
     view = view.rename(columns={
         "seller_id": "ID", "seller_name": "Name", "service": "Service",
         "city": "City", "churn_score": "Score", "risk_band": "Band",
-        "replies_202605": "Replies (May)", "lapse_rate": "Lapse Rate",
+        "replies_202605": "Replies (May)", "lapse_rate": "Lapse %",
         "bd_days_gap": "BD Gap (days)", "action_taken": "Action",
         "package_value": "Pkg Value (₹)",
     })
 
-    def style_band(val):
-        color = BAND_COLOR.get(val, "")
-        bg    = BAND_BG.get(val, "")
-        return f"background-color:{bg};color:{color};font-weight:bold" if color else ""
-
-    def style_score(val):
-        if val >= 85:   return "background-color:#2d3748;color:white;font-weight:bold"
-        elif val >= 70: return "background-color:#fed7d7;color:#c53030;font-weight:bold"
-        elif val >= 50: return "background-color:#feebc8;color:#c05621"
-        elif val >= 25: return "background-color:#fefcbf;color:#975a16"
-        return "background-color:#c6f6d5;color:#276749"
-
-    styled = view.style.map(style_band, subset=["Band"]).map(style_score, subset=["Score"])
-    st.caption("Click a row to open the Seller Detail page.")
-    event = st.dataframe(styled, use_container_width=True, height=500,
-                         on_select="rerun", selection_mode="single-row")
+    st.caption("Click anywhere on a row to open Seller Detail.")
+    event = st.dataframe(
+        view,
+        use_container_width=True,
+        height=520,
+        on_select="rerun",
+        selection_mode="single-row",
+        column_config={
+            "Score": st.column_config.NumberColumn("Score", format="%.1f"),
+            "Pkg Value (₹)": st.column_config.NumberColumn("Pkg Value (₹)", format="₹%d"),
+        },
+        hide_index=True,
+    )
     if event.selection.rows:
         selected_id = view.iloc[event.selection.rows[0]]["ID"]
         st.session_state["current_page"] = "Seller Detail"
