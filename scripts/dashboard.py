@@ -404,37 +404,60 @@ def page_overview(df: pd.DataFrame):
     if service_filter:
         view = view[view["service"].isin(service_filter)]
 
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+
     view = view.head(50)[["seller_id","seller_name","service","city","churn_score","risk_band",
                             "replies_202605","lapse_rate","bd_days_gap","action_taken","package_value"]].copy()
-
-    # Embed emoji into Band so color is visible without Styler (Styler breaks row-click)
-    view["risk_band"] = view["risk_band"].map(lambda b: f"{BAND_EMOJI.get(b,'')} {b}")
-    view["lapse_rate"] = (view["lapse_rate"] * 100).round(0).astype(int).astype(str) + "%"
+    view["lapse_rate"] = (view["lapse_rate"] * 100).round(0).astype(int)
     view["churn_score"] = view["churn_score"].round(1)
-
     view = view.rename(columns={
         "seller_id": "ID", "seller_name": "Name", "service": "Service",
         "city": "City", "churn_score": "Score", "risk_band": "Band",
-        "replies_202605": "Replies (May)", "lapse_rate": "Lapse %",
-        "bd_days_gap": "BD Gap (days)", "action_taken": "Action",
+        "replies_202605": "Replies", "lapse_rate": "Lapse %",
+        "bd_days_gap": "BD Gap", "action_taken": "Action",
         "package_value": "Pkg Value (₹)",
     })
 
+    gb = GridOptionsBuilder.from_dataframe(view)
+    gb.configure_default_column(resizable=True, sortable=True, filter=True)
+    gb.configure_selection("single", use_checkbox=False, pre_selected_rows=[])
+    gb.configure_column("ID", width=120)
+    gb.configure_column("Name", width=180)
+    gb.configure_column("Service", width=130)
+    gb.configure_column("City", width=120)
+    gb.configure_column("Score", width=90, type=["numericColumn"])
+    gb.configure_column("Band", width=110, cellStyle=JsCode("""
+        function(params) {
+            const colors = {
+                'BLACK':  {background:'#1a1a1a', color:'white'},
+                'RED':    {background:'#fed7d7', color:'#c53030'},
+                'ORANGE': {background:'#feebc8', color:'#c05621'},
+                'AMBER':  {background:'#fefcbf', color:'#975a16'},
+                'GREEN':  {background:'#c6f6d5', color:'#276749'},
+            };
+            return colors[params.value] || {};
+        }
+    """))
+    gb.configure_column("Replies", width=90, type=["numericColumn"])
+    gb.configure_column("Lapse %", width=90, type=["numericColumn"])
+    gb.configure_column("BD Gap", width=90, type=["numericColumn"])
+    gb.configure_column("Pkg Value (₹)", width=130, type=["numericColumn"])
+    grid_opts = gb.build()
+
     st.caption("Click anywhere on a row to open Seller Detail.")
-    event = st.dataframe(
+    response = AgGrid(
         view,
+        gridOptions=grid_opts,
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        height=500,
         use_container_width=True,
-        height=520,
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config={
-            "Score": st.column_config.NumberColumn("Score", format="%.1f"),
-            "Pkg Value (₹)": st.column_config.NumberColumn("Pkg Value (₹)", format="₹%d"),
-        },
-        hide_index=True,
+        allow_unsafe_jscode=True,
+        theme="alpine",
     )
-    if event.selection.rows:
-        selected_id = view.iloc[event.selection.rows[0]]["ID"]
+
+    sel = response.get("selected_rows")
+    if sel is not None and len(sel) > 0:
+        selected_id = sel[0]["ID"] if isinstance(sel[0], dict) else sel.iloc[0]["ID"]
         st.session_state["current_page"] = "Seller Detail"
         st.session_state["seller_search"] = str(selected_id)
         st.rerun()
