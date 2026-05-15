@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/c/Users/imart/AppData/Local/Programs/Python/Python311/python data/generate_sample.py)",
+      "Bash(/c/Users/imart/AppData/Local/Programs/Python/Python311/python -m pip install streamlit plotly pandas openai python-dotenv -q)",
+      "Edit(/.claude/skills/skill_whatsapp_agent/**)",
+      "Edit(/.claude/skills/skill_feature_engineer/**)",
+      "Edit(/.claude/skills/skill_alert_logger/**)",
+      "Edit(/.claude/skills/skill_bd_brief/**)",
+      "Edit(/.claude/skills/skill_data_loader/**)",
+      "Edit(/.claude/skills/skill_call_agent/**)"
+    ]
+  }
+}
