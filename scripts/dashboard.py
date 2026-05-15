@@ -72,17 +72,17 @@ def _clean_wa_message(text: str) -> str:
 
 def _llm_client():
     from openai import OpenAI
-    return OpenAI(api_key="sk-ZMOQS2onmuyv6-bFyigELw", base_url="https://imllm.intermesh.net/v1")
+    return OpenAI(api_key="sk-FoTNcUSeI_XrMgbXLqiI0w", base_url="https://imllm.intermesh.net/v1")
 
 def send_via_wahelp(message: str) -> dict:
     """Send a free-flow WhatsApp message via IndiaMart VANI API."""
     import requests as _req
-    from config import WA_API_KEY, AISENSY_TARGET_NUMBER
-    mobile = AISENSY_TARGET_NUMBER  # always send to fixed demo number
+    from config import WA_API_KEY, WA_PLATFORM
+    mobile = "917389680021"
 
     url = (
         f"https://wahelp.indiamart.com/whatsapp/wrapper_api_prod.php"
-        f"?action=sendMessage&user={mobile}&api_key={WA_API_KEY}"
+        f"?action=vani_send_msg&user={mobile}&api_key={WA_API_KEY}"
     )
     payload_json = json.dumps({
         "messaging_product": "whatsapp",
@@ -90,26 +90,24 @@ def send_via_wahelp(message: str) -> dict:
         "type":              "text",
         "text":              {"preview_url": False, "body": message},
         "sent_from_CWI":     True,
-        "platform":          "WhatsApp_9910273309",
+        "platform":          WA_PLATFORM,
     })
-    debug = {
-        "url":            url,
-        "method":         "POST",
-        "headers":        {"Content-Type": "application/x-www-form-urlencoded"},
-        "payload":        json.loads(payload_json),
-    }
     resp = _req.post(
         url,
         data={"payload": payload_json},
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=10,
     )
-    debug["response_status"] = resp.status_code
     try:
-        debug["response_body"] = resp.json()
+        resp_body = resp.json()
     except Exception:
-        debug["response_body"] = resp.text
-    return debug
+        resp_body = resp.text
+    return {
+        "url":             url,
+        "payload":         json.loads(payload_json),
+        "response_status": resp.status_code,
+        "response_body":   resp_body,
+    }
 
 def _extract_content(resp) -> str:
     """Qwen3 thinking mode can return content=None with text in reasoning_content."""
@@ -153,8 +151,8 @@ Keep under 150 words. BD reads this 2 minutes before the call."""
 
         resp = client.chat.completions.create(
             model="openrouter/qwen/qwen3-32b",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=400,
+            messages=[{"role": "user", "content": "/no_think\n" + prompt}],
+            max_tokens=600,
             temperature=0.7,
         )
         return _extract_content(resp) or "(No response from model)"
@@ -164,18 +162,30 @@ Keep under 150 words. BD reads this 2 minutes before the call."""
 def generate_whatsapp_message(seller: pd.Series) -> str:
     try:
         client = _llm_client()
-        prompt = f"""Write a short WhatsApp message (max 80 chars) to re-engage an IndiaMart seller.
+        prompt = f"""Write a short, warm WhatsApp message from IndiaMart to re-engage an MSME seller.
 
-Seller: {seller['seller_name']} | Products: {seller['top_category']}
-Replies dropped to {seller['replies_202605']} (was {seller['replies_202602']}). Lapse: {int(seller['lapse_rate']*100)}%.
+Seller details:
+- Name: {seller['seller_name']}
+- Products: {seller['top_category']}
+- City: {seller['city']}
+- Package: ₹{int(seller.get('package_value', 0)):,}/year
+- Buyer replies have dropped from {seller['replies_202602']} to {seller['replies_202605']} over the last 4 months
 
-Rules: mention their product, ask ONE question, no "risk"/"score" words, max 80 chars.
-Output the message only — no quotes, no explanation."""
+Rules:
+- Address them by first name warmly (e.g. "Hi Suresh,")
+- Mention their specific product category and the buyer interest on IndiaMart positively
+- Ask one genuine, helpful question — like whether they need support or if anything can be improved
+- Tone: friendly account manager, not a sales pitch — like a colleague checking in
+- Plain English only, simple words, conversational
+- Maximum 3 sentences — short and meaningful
+- Never use words: risk, score, lapse, churn, alert, warning, drop, decline
+
+Output only the message — no subject line, no quotes, no explanation."""
 
         resp = client.chat.completions.create(
             model="openrouter/qwen/qwen3-32b",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=60,
+            messages=[{"role": "user", "content": "/no_think\n" + prompt}],
+            max_tokens=200,
             temperature=0.8,
         )
         return _clean_wa_message(_extract_content(resp)) or "(No response from model)"
@@ -349,7 +359,7 @@ def score_histogram(df: pd.DataFrame) -> go.Figure:
 # ── Page: Overview ────────────────────────────────────────────────────────────
 
 def page_overview(df: pd.DataFrame):
-    st.title("Seller Churn Early-Warning System")
+    st.title("SARA — Seller Alert & Retention Agent")
     st.caption("Hackathon May 15–16, 2026  ·  998 sellers  ·  4-month behavioral scoring")
 
     # KPI row
@@ -381,12 +391,14 @@ def page_overview(df: pd.DataFrame):
     st.divider()
     st.subheader("Top 50 At-Risk Sellers")
 
+    if "overview_band_filter" not in st.session_state:
+        st.session_state["overview_band_filter"] = ["BLACK", "RED"]
     band_filter = st.multiselect(
         "Filter by band",
         ["BLACK","RED","ORANGE","AMBER","GREEN"],
-        default=["BLACK","RED"],
+        key="overview_band_filter",
     )
-    service_filter = st.multiselect("Filter by service", sorted(df["service"].unique()), default=[])
+    service_filter = st.multiselect("Filter by service", sorted(df["service"].unique()), default=[], key="overview_service_filter")
 
     view = df[df["risk_band"].isin(band_filter)] if band_filter else df
     if service_filter:
@@ -415,7 +427,14 @@ def page_overview(df: pd.DataFrame):
         return "background-color:#c6f6d5;color:#276749"
 
     styled = view.style.applymap(style_band, subset=["Band"]).applymap(style_score, subset=["Score"])
-    st.dataframe(styled, use_container_width=True, height=500)
+    st.caption("Click a row to open the Seller Detail page.")
+    event = st.dataframe(styled, use_container_width=True, height=500,
+                         on_select="rerun", selection_mode="single-row")
+    if event.selection.rows:
+        selected_id = view.iloc[event.selection.rows[0]]["ID"]
+        st.session_state["current_page"] = "Seller Detail"
+        st.session_state["seller_search"] = str(selected_id)
+        st.rerun()
 
 # ── Page: Seller Detail ───────────────────────────────────────────────────────
 
@@ -425,7 +444,9 @@ def page_seller_detail(df: pd.DataFrame):
     # Search
     col_search, col_band = st.columns([3, 1])
     with col_search:
-        query = st.text_input("Search by Seller ID or Name", placeholder="e.g. 264768627 or Rahul")
+        query = st.text_input("Search by Seller ID or Name",
+                               key="seller_search",
+                               placeholder="e.g. 264768627 or Rahul")
     with col_band:
         band_jump = st.selectbox("Or jump to band", ["— All —", "BLACK", "RED", "ORANGE", "AMBER", "GREEN"])
 
@@ -586,24 +607,26 @@ def page_seller_detail(df: pd.DataFrame):
                 </div>""", unsafe_allow_html=True)
 
                 sent_key = f"wa_sent_{seller['seller_id']}"
-                if st.session_state.get(sent_key):
-                    st.success("✅ WhatsApp sent successfully!")
+                prev_result = st.session_state.get(sent_key)
+                if prev_result:
+                    body = prev_result.get("response_body", {})
+                    status = prev_result.get("response_status")
+                    if isinstance(body, dict) and body.get("status") in ("success", "sent", "queued", "200"):
+                        st.success("✅ WhatsApp sent successfully!")
+                    else:
+                        st.error(f"Send failed (HTTP {status})")
+                    with st.expander("API Response"):
+                        st.json(prev_result)
                 else:
                     if st.button("📤 Send WhatsApp", type="primary", key=f"send_wa_{seller['seller_id']}"):
-                        with st.spinner("Sending..."):
+                        with st.spinner("Sending via VANI API..."):
                             try:
                                 result = send_via_wahelp(cached_wa)
                                 st.session_state[sent_key] = result
-                                st.success("✅ WhatsApp sent successfully!")
                             except Exception as e:
                                 result = {"error": str(e)}
-                                st.error(f"Send failed: {e}")
-                        # Log full request+response to browser console
-                        import streamlit.components.v1 as components
-                        components.html(
-                            f"<script>console.log('[WA API]', {json.dumps(result, indent=2)});</script>",
-                            height=0,
-                        )
+                                st.session_state[sent_key] = result
+                        st.rerun()
         else:
             st.info("WhatsApp not dispatched for this band — use BD call instead." if score >= 85 else "No WhatsApp needed for GREEN band.")
 
@@ -698,51 +721,168 @@ def page_alert_log():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+_GLOBAL_CSS = """
+<style>
+/* ── Smooth base ─────────────────────────────────────────── */
+html, body, [class*="css"] { font-family: 'Inter', 'Segoe UI', sans-serif; }
+.block-container { padding-top: 1.2rem !important; padding-bottom: 2rem !important; }
+
+/* ── Sidebar shell ───────────────────────────────────────── */
+[data-testid="stSidebar"] > div:first-child {
+    background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
+    padding: 0;
+}
+[data-testid="stSidebar"] { border-right: none; }
+
+/* ── SARA brand block ────────────────────────────────────── */
+.sara-brand {
+    padding: 20px 16px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    margin-bottom: 8px;
+}
+.sara-brand .logo { font-size: 1.5rem; font-weight: 800; color: #f8fafc; letter-spacing: -0.5px; }
+.sara-brand .tagline { font-size: 0.72rem; color: #94a3b8; margin-top: 2px; letter-spacing: 0.3px; text-transform: uppercase; }
+.sara-brand .meta { font-size: 0.78rem; color: #64748b; margin-top: 8px; }
+
+/* ── Band pills in sidebar ───────────────────────────────── */
+[data-testid="stSidebar"] .band-section { padding: 0 12px; }
+[data-testid="stSidebar"] .band-section p {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.8px;
+    color: #475569 !important; margin: 12px 0 6px !important; font-weight: 600;
+}
+
+/* Band buttons */
+[data-testid="stSidebar"] [data-testid="stButton"] > button {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    color: #cbd5e1 !important;
+    font-size: 0.83rem !important;
+    font-weight: 500 !important;
+    padding: 7px 12px !important;
+    text-align: left !important;
+    width: 100% !important;
+    transition: background 0.15s ease, color 0.15s ease !important;
+    box-shadow: none !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button:hover {
+    background: rgba(255,255,255,0.08) !important;
+    color: #f1f5f9 !important;
+}
+[data-testid="stSidebar"] [data-testid="stButton"] > button[kind="primary"] {
+    background: rgba(99,179,237,0.18) !important;
+    color: #90cdf4 !important;
+    border-left: 3px solid #63b3ed !important;
+    border-radius: 0 8px 8px 0 !important;
+}
+
+/* ── Metric cards ────────────────────────────────────────── */
+[data-testid="stMetric"] {
+    background: #ffffff;
+    border-radius: 14px !important;
+    padding: 18px 20px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04) !important;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+[data-testid="stMetric"]:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04) !important;
+    transform: translateY(-1px);
+}
+[data-testid="stMetricValue"] { font-size: 2rem !important; font-weight: 800 !important; color: #0f172a !important; }
+[data-testid="stMetricLabel"] { font-size: 0.78rem !important; font-weight: 600 !important; color: #64748b !important; text-transform: uppercase; letter-spacing: 0.4px; }
+[data-testid="stMetricDelta"] { font-size: 0.8rem !important; }
+
+/* ── Dividers ────────────────────────────────────────────── */
+hr { border-color: rgba(255,255,255,0.07) !important; margin: 8px 0 !important; }
+
+/* ── Dataframe ───────────────────────────────────────────── */
+[data-testid="stDataFrame"] { border-radius: 12px !important; overflow: hidden; }
+
+/* ── Sidebar scrollbar ───────────────────────────────────── */
+[data-testid="stSidebar"] ::-webkit-scrollbar { width: 4px; }
+[data-testid="stSidebar"] ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+/* ── Page title ──────────────────────────────────────────── */
+h1 { font-weight: 800 !important; letter-spacing: -0.5px !important; color: #0f172a !important; }
+</style>
+"""
+
+_NAV_ITEMS = [
+    ("🏠", "Overview"),
+    ("🔍", "Seller Detail"),
+    ("📊", "Band Analysis"),
+    ("📋", "Alert Log"),
+]
+
+_BAND_ICONS = {"BLACK": "⚫", "RED": "🔴", "ORANGE": "🟠", "AMBER": "🟡", "GREEN": "🟢"}
+
+
+def _nav(page: str):
+    st.session_state["current_page"] = page
+    st.rerun()
+
+
 def main():
     st.set_page_config(
-        page_title="Seller Churn Dashboard",
-        page_icon="📊",
+        page_title="SARA — Seller Alert & Retention Agent",
+        page_icon="🛡️",
         layout="wide",
         initial_sidebar_state="expanded",
     )
+    st.markdown(_GLOBAL_CSS, unsafe_allow_html=True)
 
-    st.markdown("""
-    <style>
-    .block-container { padding-top: 1.5rem; }
-    [data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: 700; }
-    </style>
-    """, unsafe_allow_html=True)
+    if "current_page" not in st.session_state:
+        st.session_state["current_page"] = "Overview"
 
     df = load_data()
+    current = st.session_state["current_page"]
+    band_counts = df["risk_band"].value_counts()
 
     with st.sidebar:
-        st.markdown("## 📊 Churn Dashboard")
-        st.markdown(f"**{len(df):,} sellers** · {pd.Timestamp.now().strftime('%b %d, %Y')}")
+        # ── Brand ────────────────────────────────────────────────
+        st.markdown(f"""
+        <div class="sara-brand">
+            <div class="logo">🛡️ SARA</div>
+            <div class="tagline">Seller Alert &amp; Retention Agent</div>
+            <div class="meta">{len(df):,} sellers &nbsp;·&nbsp; {pd.Timestamp.now().strftime('%d %b %Y')}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        band_counts = df["risk_band"].value_counts()
-        for band in ["BLACK","RED","ORANGE","AMBER","GREEN"]:
+        # ── Risk band shortcuts ───────────────────────────────────
+        st.markdown('<div class="band-section"><p>Risk Bands</p></div>', unsafe_allow_html=True)
+        for band in ["BLACK", "RED", "ORANGE", "AMBER", "GREEN"]:
             n = band_counts.get(band, 0)
-            st.markdown(
-                f"<div style='padding:4px 8px;background:{BAND_BG.get(band,'#fff')};border-left:4px solid {BAND_COLOR[band]};border-radius:4px;margin-bottom:4px'>"
-                f"{BAND_EMOJI[band]} <strong>{band}</strong>: {n} sellers</div>",
-                unsafe_allow_html=True,
-            )
+            label = f"{_BAND_ICONS[band]}  {band}  —  {n} sellers"
+            if st.button(label, key=f"band_pill_{band}", use_container_width=True):
+                st.session_state["current_page"] = "Overview"
+                st.session_state["overview_band_filter"] = [band]
+                # clear service filter so it doesn't conflict
+                st.session_state.pop("overview_service_filter", None)
 
-        st.divider()
-        page = st.radio(
-            "Navigate",
-            ["Overview", "Seller Detail", "Band Analysis", "Alert Log"],
-            label_visibility="collapsed",
-        )
+        st.markdown("<hr/>", unsafe_allow_html=True)
 
-    if page == "Overview":
+        # ── Navigation ────────────────────────────────────────────
+        st.markdown('<div class="band-section"><p>Navigate</p></div>', unsafe_allow_html=True)
+        for icon, page_name in _NAV_ITEMS:
+            is_active = current == page_name
+            if st.button(
+                f"{icon}  {page_name}",
+                key=f"nav_{page_name}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary",
+            ):
+                st.session_state["current_page"] = page_name
+                st.rerun()
+
+    if current == "Overview":
         page_overview(df)
-    elif page == "Seller Detail":
+    elif current == "Seller Detail":
         page_seller_detail(df)
-    elif page == "Band Analysis":
+    elif current == "Band Analysis":
         page_band_analysis(df)
-    elif page == "Alert Log":
+    elif current == "Alert Log":
         page_alert_log()
+
 
 if __name__ == "__main__":
     main()

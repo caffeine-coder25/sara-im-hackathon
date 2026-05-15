@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # IndiaMart LLM Gateway (OpenAI-compatible)
-IM_LLM_API_KEY  = os.getenv("IM_LLM_API_KEY", "sk-ZMOQS2onmuyv6-bFyigELw")
+IM_LLM_API_KEY  = os.getenv("IM_LLM_API_KEY", "sk-FoTNcUSeI_XrMgbXLqiI0w")
 IM_LLM_BASE_URL = os.getenv("IM_LLM_BASE_URL", "https://imllm.intermesh.net/v1")
 IM_LLM_MODEL    = os.getenv("IM_LLM_MODEL",    "openrouter/qwen/qwen3-32b")
 
