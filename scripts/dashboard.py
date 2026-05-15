@@ -426,7 +426,7 @@ def page_overview(df: pd.DataFrame):
         elif val >= 25: return "background-color:#fefcbf;color:#975a16"
         return "background-color:#c6f6d5;color:#276749"
 
-    styled = view.style.applymap(style_band, subset=["Band"]).applymap(style_score, subset=["Score"])
+    styled = view.style.map(style_band, subset=["Band"]).map(style_score, subset=["Score"])
     st.caption("Click a row to open the Seller Detail page.")
     event = st.dataframe(styled, use_container_width=True, height=500,
                          on_select="rerun", selection_mode="single-row")
