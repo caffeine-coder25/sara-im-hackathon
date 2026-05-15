@@ -9,13 +9,13 @@ IM_LLM_BASE_URL = os.getenv("IM_LLM_BASE_URL", "https://imllm.intermesh.net/v1")
 IM_LLM_MODEL    = os.getenv("IM_LLM_MODEL",    "openrouter/qwen/qwen3-32b")
 
 # WhatsApp / AISENSY
-WA_API_KEY  = os.getenv("WA_API_KEY", "")
+WA_API_KEY  = os.getenv("WA_API_KEY", "Xy7Z9v2PqRt8LmN5")
 WA_API_URL  = os.getenv("WA_API_URL", "https://wahelp.indiamart.com/whatsapp/wrapper_api_prod.php")
 WA_PLATFORM = os.getenv("WA_PLATFORM", "WhatsApp_9696")
 AISENSY_PROJECT_ID = os.getenv("AISENSY_PROJECT_ID", "")
 AISENSY_PWD = os.getenv("AISENSY_PWD", "")
 AISENSY_API_KEY = os.getenv("AISENSY_API_KEY", "")
-AISENSY_TARGET_NUMBER = os.getenv("AISENSY_TARGET_NUMBER", "919643079339")
+AISENSY_TARGET_NUMBER = os.getenv("AISENSY_TARGET_NUMBER", "917389680021")
 
 # SquadStack / IVR
 SQUADSTACK_BEARER_TOKEN = os.getenv("SQUADSTACK_BEARER_TOKEN", "")

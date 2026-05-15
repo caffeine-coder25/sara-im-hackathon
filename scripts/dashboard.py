@@ -55,15 +55,78 @@ def load_alert_log() -> pd.DataFrame:
         return pd.read_csv(ALERT_LOG, dtype={"seller_id": str})
     return pd.DataFrame()
 
+# ── LLM helpers ──────────────────────────────────────────────────────────────
+
+def _clean_wa_message(text: str) -> str:
+    """Strip model preamble lines that leak into the output."""
+    import re
+    lines = text.strip().splitlines()
+    # Drop any line that looks like thinking/meta commentary
+    skip_patterns = re.compile(
+        r"^(okay|sure|here|i need|i will|i'll|let me|this is|below is|"
+        r"the message|whatsapp message|message:|note:|draft:)",
+        re.IGNORECASE,
+    )
+    cleaned = [l for l in lines if not skip_patterns.match(l.strip())]
+    return " ".join(cleaned).strip().strip('"').strip("'")
+
+def _llm_client():
+    from openai import OpenAI
+    return OpenAI(api_key="sk-ZMOQS2onmuyv6-bFyigELw", base_url="https://imllm.intermesh.net/v1")
+
+def send_via_wahelp(message: str) -> dict:
+    """Send a free-flow WhatsApp message via IndiaMart VANI API."""
+    import requests as _req
+    from config import WA_API_KEY, AISENSY_TARGET_NUMBER
+    mobile = AISENSY_TARGET_NUMBER  # always send to fixed demo number
+
+    url = (
+        f"https://wahelp.indiamart.com/whatsapp/wrapper_api_prod.php"
+        f"?action=sendMessage&user={mobile}&api_key={WA_API_KEY}"
+    )
+    payload_json = json.dumps({
+        "messaging_product": "whatsapp",
+        "to":                mobile,
+        "type":              "text",
+        "text":              {"preview_url": False, "body": message},
+        "sent_from_CWI":     True,
+        "platform":          "WhatsApp_9910273309",
+    })
+    debug = {
+        "url":            url,
+        "method":         "POST",
+        "headers":        {"Content-Type": "application/x-www-form-urlencoded"},
+        "payload":        json.loads(payload_json),
+    }
+    resp = _req.post(
+        url,
+        data={"payload": payload_json},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=10,
+    )
+    debug["response_status"] = resp.status_code
+    try:
+        debug["response_body"] = resp.json()
+    except Exception:
+        debug["response_body"] = resp.text
+    return debug
+
+def _extract_content(resp) -> str:
+    """Qwen3 thinking mode can return content=None with text in reasoning_content."""
+    msg = resp.choices[0].message
+    text = getattr(msg, "content", None)
+    if not text:
+        text = getattr(msg, "reasoning_content", None)
+    if not text:
+        # some gateway wrappers put it under choices[0].text
+        text = getattr(resp.choices[0], "text", None)
+    return (text or "").strip()
+
 # ── LLM brief generation ─────────────────────────────────────────────────────
 
 def generate_bd_brief(seller: pd.Series) -> str:
     try:
-        from openai import OpenAI
-        client = OpenAI(
-            api_key="sk-ZMOQS2onmuyv6-bFyigELw",
-            base_url="https://imllm.intermesh.net/v1",
-        )
+        client = _llm_client()
         risk_factors = seller.get("top_risk_factors", "")
         prompt = f"""You are preparing a BD call brief for a seller retention call at IndiaMart.
 
@@ -94,41 +157,28 @@ Keep under 150 words. BD reads this 2 minutes before the call."""
             max_tokens=400,
             temperature=0.7,
         )
-        return resp.choices[0].message.content.strip()
+        return _extract_content(resp) or "(No response from model)"
     except Exception as e:
         return f"(LLM unavailable: {e})"
 
 def generate_whatsapp_message(seller: pd.Series) -> str:
     try:
-        from openai import OpenAI
-        client = OpenAI(
-            api_key="sk-ZMOQS2onmuyv6-bFyigELw",
-            base_url="https://imllm.intermesh.net/v1",
-        )
-        prompt = f"""You are an IndiaMart seller success agent. Write a WhatsApp message to re-engage this seller.
+        client = _llm_client()
+        prompt = f"""Write a short WhatsApp message (max 80 chars) to re-engage an IndiaMart seller.
 
-Seller: {seller['seller_name']}
-Products: {seller['top_category']}
-Replies this month: {seller['replies_202605']} (was {seller['replies_202602']} in Feb)
-BL lapse rate: {int(seller['lapse_rate']*100)}%
-Risk band: {seller['risk_band']}
+Seller: {seller['seller_name']} | Products: {seller['top_category']}
+Replies dropped to {seller['replies_202605']} (was {seller['replies_202602']}). Lapse: {int(seller['lapse_rate']*100)}%.
 
-Rules:
-- Do NOT mention "churn score", "risk", or "we're worried"
-- Reference their specific product category
-- Ask ONE question that invites re-engagement
-- Keep under 160 characters
-- Tone: helpful, not alarming (AMBER=curious, ORANGE/RED=direct about opportunity cost)
-
-Write ONLY the message, nothing else."""
+Rules: mention their product, ask ONE question, no "risk"/"score" words, max 80 chars.
+Output the message only — no quotes, no explanation."""
 
         resp = client.chat.completions.create(
             model="openrouter/qwen/qwen3-32b",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
+            max_tokens=60,
             temperature=0.8,
         )
-        return resp.choices[0].message.content.strip()
+        return _clean_wa_message(_extract_content(resp)) or "(No response from model)"
     except Exception as e:
         return f"(LLM unavailable: {e})"
 
@@ -534,6 +584,26 @@ def page_seller_detail(df: pd.DataFrame):
                     <p style="margin-top:8px;font-size:0.95em">{cached_wa}</p>
                     <small style="color:#718096">{len(cached_wa)} chars</small>
                 </div>""", unsafe_allow_html=True)
+
+                sent_key = f"wa_sent_{seller['seller_id']}"
+                if st.session_state.get(sent_key):
+                    st.success("✅ WhatsApp sent successfully!")
+                else:
+                    if st.button("📤 Send WhatsApp", type="primary", key=f"send_wa_{seller['seller_id']}"):
+                        with st.spinner("Sending..."):
+                            try:
+                                result = send_via_wahelp(cached_wa)
+                                st.session_state[sent_key] = result
+                                st.success("✅ WhatsApp sent successfully!")
+                            except Exception as e:
+                                result = {"error": str(e)}
+                                st.error(f"Send failed: {e}")
+                        # Log full request+response to browser console
+                        import streamlit.components.v1 as components
+                        components.html(
+                            f"<script>console.log('[WA API]', {json.dumps(result, indent=2)});</script>",
+                            height=0,
+                        )
         else:
             st.info("WhatsApp not dispatched for this band — use BD call instead." if score >= 85 else "No WhatsApp needed for GREEN band.")
 

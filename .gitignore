@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pkl
+sara.db
+alert_log.csv
+data/sellers_data_cleaned.xlsx
+data/sellers_data_scored.csv
+.DS_Store
