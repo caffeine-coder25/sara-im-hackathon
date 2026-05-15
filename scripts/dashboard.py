@@ -456,10 +456,16 @@ def page_overview(df: pd.DataFrame):
     )
 
     sel = response.get("selected_rows")
-    if sel is not None and len(sel) > 0:
-        selected_id = sel[0]["ID"] if isinstance(sel[0], dict) else sel.iloc[0]["ID"]
+    selected_id = None
+    if isinstance(sel, pd.DataFrame):
+        if not sel.empty:
+            selected_id = str(sel.iloc[0]["ID"])
+    elif isinstance(sel, list) and len(sel) > 0:
+        selected_id = str(sel[0].get("ID", "") if isinstance(sel[0], dict) else sel[0])
+
+    if selected_id:
         st.session_state["current_page"] = "Seller Detail"
-        st.session_state["seller_search"] = str(selected_id)
+        st.session_state["seller_search"] = selected_id
         st.rerun()
 
 # ── Page: Seller Detail ───────────────────────────────────────────────────────
