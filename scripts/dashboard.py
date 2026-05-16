@@ -643,10 +643,13 @@ def page_seller_detail(df: pd.DataFrame):
                 if prev_result:
                     body = prev_result.get("response_body", {})
                     status = prev_result.get("response_status")
-                    if isinstance(body, dict) and body.get("status") in ("success", "sent", "queued", "200"):
+                    # HTTP 200 = accepted by server. Body status varies by API version.
+                    body_status = (body.get("status") or body.get("STATUS") or "") if isinstance(body, dict) else str(body)
+                    is_success = (status == 200) or str(body_status).lower() in ("success", "sent", "queued", "ok", "200")
+                    if is_success:
                         st.success("✅ WhatsApp sent successfully!")
                     else:
-                        st.error(f"Send failed (HTTP {status})")
+                        st.error(f"Send failed — check API Response below")
                     with st.expander("API Response"):
                         st.json(prev_result)
                 else:
